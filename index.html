@@ -105,6 +105,7 @@ var C={bg:"#F5F4F0",surface:"#FFFFFF",border:"#E2DED6",accent:"#1B4FD8",aL:"#EBF
 
 var QUADRANTS=[
   {id:"do",    label:"FAIRE AUJOURD'HUI",sub:"Urgent + Important",        color:C.danger,  bg:C.dL, icon:"🔴"},
+  {id:"week",  label:"CETTE SEMAINE",    sub:"À faire cette semaine",     color:"#7C3AED",bg:"#EDE9FE",icon:"📆"},
   {id:"plan",  label:"PLANIFIER",        sub:"Important — avec une date", color:C.accent,  bg:C.aL, icon:"🔵"},
   {id:"deleg", label:"DÉLÉGUER → CHARI", sub:"Urgent, pas important",     color:C.gold,    bg:C.gL, icon:"🟡"},
   {id:"wait",  label:"EN ATTENTE",       sub:"Attend réponse / action",   color:C.orange,  bg:C.oL, icon:"⏳"},
@@ -377,6 +378,11 @@ function BrainDump(p){
         })
       ),
       h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
+        h("button",{onClick:function(){aQ(cur.id,"week");},style:{padding:"10px 8px",borderRadius:12,cursor:"pointer",border:"2px solid #7C3AED",background:"#EDE9FE",display:"flex",flexDirection:"column",alignItems:"flex-start",gap:2}},
+          h("div",{style:{fontSize:14}},"📆"),
+          h("div",{style:{fontSize:11,fontWeight:700,color:"#7C3AED"}},"CETTE SEMAINE"),
+          h("div",{style:{fontSize:10,color:C.muted}},"À faire cette semaine")
+        ),
         h("button",{onClick:function(){aQ(cur.id,"chari");},style:{padding:"10px 8px",borderRadius:12,cursor:"pointer",border:"2px solid "+C.purple,background:C.pL,display:"flex",flexDirection:"column",alignItems:"flex-start",gap:2}},
           h("div",{style:{fontSize:14}},"🟣"),
           h("div",{style:{fontSize:11,fontWeight:700,color:C.purple}},"TACHES CHARI"),
@@ -520,7 +526,8 @@ function Matrix(p){
   var s10=useState(""),editText=s10[0],setEditText=s10[1];
   var s11=useState(""),nWait=s11[0],setNWait=s11[1];
   var s12=useState({}),doneExp=s12[0],setDoneExp=s12[1];
-  var s13=useState(false),sortLock=s13[0],setSortLock=s13[1];
+  var sortTimerRef=useRef(null);
+  var sortedDatedRef=useRef(null); // cached sort order, only updates after debounce
   var tRef=useRef();
 
   useEffect(function(){
@@ -535,6 +542,9 @@ function Matrix(p){
   var today=tStr();
   var weekStart=getWeekStart();
   var dueToday=p.items.filter(function(x){return x.quadrant==="plan"&&!x.doneDate&&x.planDate&&x.planDate<=today;});
+  // This week = planDate after today but within the next 7 days
+  var endOfWeek=(function(){var d=new Date();d.setDate(d.getDate()+7);return d.toISOString().slice(0,10);})();
+  var dueThisWeek=p.items.filter(function(x){return x.quadrant==="plan"&&!x.doneDate&&x.planDate&&x.planDate>today&&x.planDate<=endOfWeek;}).slice().sort(function(a,b){return a.planDate<b.planDate?-1:1;});
 
   function addI(){
     if(!nT.trim())return;
@@ -545,10 +555,12 @@ function Matrix(p){
   function rmI(id){p.setItems(function(items){return items.filter(function(x){return x.id!==id;});});}
   function mvI(id,q){p.setItems(function(items){return items.map(function(x){return x.id===id?Object.assign({},x,{quadrant:q,planDate:(q==="plan"||q==="chari"||q==="perso")?x.planDate:null}):x;});});setMM(null);}
   function setPD(id,d){
-    setSortLock(true);
+    // Update the date immediately
     p.setItems(function(items){return items.map(function(x){return x.id===id?Object.assign({},x,{planDate:d}):x;});});
+    // Debounce the sort: only re-sort 1.5s after last change
+    clearTimeout(sortTimerRef.current);
+    sortTimerRef.current=setTimeout(function(){sortedDatedRef.current=null;},1500);
   }
-  function releaseSortLock(){setSortLock(false);}
   function saveEdit(id){p.setItems(function(items){return items.map(function(x){return x.id===id?Object.assign({},x,{text:editText}):x;});});setEditId(null);}
   function promoteToUrgent(id){p.setItems(function(items){return items.map(function(x){return x.id===id?Object.assign({},x,{quadrant:"do",planDate:null}):x;});});}
   function mkToLearn(id){
@@ -603,7 +615,7 @@ function Matrix(p){
                 st&&h(Tag,{color:C.stale},"🔴 "+dSince(item.addedDate)+"j"),
                 item.subStatus==="toLearn"&&h(Tag,{color:C.purple},"🎓 A former"),
                 isObs&&h(Tag,{color:C.purple},"👁 Observer"),
-                (q.id==="plan"||q.id==="chari"||q.id==="perso")&&!item.doneDate&&h("input",{type:"date",value:item.planDate||"",onChange:function(e){setPD(item.id,e.target.value);},onBlur:releaseSortLock,style:{fontSize:10,border:"1px solid "+(np?q.color:C.border),borderRadius:5,padding:"2px 4px",color:np?q.color:C.muted,background:"transparent"}}),
+                (q.id==="plan"||q.id==="chari"||q.id==="perso")&&!item.doneDate&&h("input",{type:"date",value:item.planDate||"",onChange:function(e){setPD(item.id,e.target.value);},style:{fontSize:10,border:"1px solid "+(np?q.color:C.border),borderRadius:5,padding:"2px 4px",color:np?q.color:C.muted,background:"transparent"}}),
                 item.planDate&&(q.id==="plan"||q.id==="chari"||q.id==="perso")&&!item.doneDate&&h(Tag,{color:item.planDate<=today?C.stale:q.color},(item.planDate<=today?"🔔 ":"📅 ")+fDate(item.planDate)),
                 q.id==="wait"&&item.waitingFor&&h(Tag,{color:C.orange},"⏳ "+item.waitingFor)
               )
@@ -669,9 +681,78 @@ function Matrix(p){
     );
   }
 
+  function renderWeekSection(){
+    var weekColor="#7C3AED",weekBg="#EDE9FE";
+    var q={id:"week",label:"CETTE SEMAINE",color:weekColor,bg:weekBg,icon:"📆"};
+    var endOfWeek=(function(){var d=new Date();d.setDate(d.getDate()+7);return d.toISOString().slice(0,10);})();
+    // Manual items (quadrant=week) + auto-included plan items with date this week
+    var manualItems=p.items.filter(function(x){return x.quadrant==="week"&&!x.doneDate;});
+    var autoItems=p.items.filter(function(x){return x.quadrant==="plan"&&x.planDate&&x.planDate>today&&x.planDate<=endOfWeek&&!x.doneDate;});
+    // Merge, dedupe by id, sort by date
+    var seen={};
+    var allItems=manualItems.concat(autoItems).filter(function(x){if(seen[x.id])return false;seen[x.id]=true;return true;});
+    allItems.sort(function(a,b){if(!a.planDate&&!b.planDate)return 0;if(!a.planDate)return 1;if(!b.planDate)return -1;return a.planDate<b.planDate?-1:1;});
+    var doneItems=p.items.filter(function(x){return x.quadrant==="week"&&x.doneDate&&x.doneDate>=weekStart;});
+    var io=dO==="week";
+    return h("div",{
+      onDragOver:function(e){e.preventDefault();setDO("week");},
+      onDragLeave:function(){setDO(null);},
+      onDrop:function(e){onDrop(e,"week");},
+      style:{background:io?weekBg+"dd":C.surface,border:(io?"2":"1")+"px solid "+(io?weekColor:C.border),borderTop:"3px solid "+weekColor,borderRadius:12,padding:10,transition:"all 0.15s",minWidth:0}},
+      h(R,{style:{marginBottom:3}},
+        h("span",{style:{fontSize:12}},"📆"),
+        h("div",{style:{flex:1,minWidth:0}},
+          h("div",{style:{fontSize:9,fontWeight:700,color:weekColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}},"CETTE SEMAINE"),
+          h("div",{style:{fontSize:9,color:C.muted}},"Maintenant → 7 jours")
+        ),
+        h("span",{style:{fontSize:11,fontWeight:700,color:weekColor,flexShrink:0}},allItems.length)
+      ),
+      h("div",{style:{borderTop:"1px solid "+C.border,marginTop:6,paddingTop:6,display:"flex",flexDirection:"column",gap:4}},
+        allItems.length===0&&doneItems.length===0&&h("div",{style:{fontSize:10,color:C.muted,fontStyle:"italic",padding:"4px 0",textAlign:"center"}},"Rien cette semaine"),
+        allItems.map(function(item){
+          var isAuto=item.quadrant==="plan";
+          return h("div",{key:item.id,draggable:true,
+            onDragStart:function(e){setDId(item.id);e.dataTransfer.effectAllowed="move";},
+            onDragEnd:function(){setDId(null);setDO(null);},
+            style:{borderRadius:8,background:isAuto?"#F5F3FF":weekBg,border:"1px "+(isAuto?"dashed "+weekColor:"solid transparent"),padding:"6px 8px",cursor:"grab",opacity:dId===item.id?0.4:1}},
+            editId===item.id
+              ?h(Cl,{gap:5},
+                  h("input",{value:editText,onChange:function(e){setEditText(e.target.value);},autoFocus:true,onKeyDown:function(e){if(e.key==="Enter")saveEdit(item.id);if(e.key==="Escape")setEditId(null);},style:{width:"100%",padding:"5px 8px",border:"2px solid "+weekColor,borderRadius:6,fontSize:12,outline:"none",color:C.text}}),
+                  h(R,{gap:5},h(Btn,{onClick:function(){saveEdit(item.id);},style:{fontSize:11,padding:"3px 9px"}},"OK"),h(Btn,{variant:"ghost",onClick:function(){setEditId(null);},style:{fontSize:11,padding:"3px 9px"}},"Annuler"))
+                )
+              :h(R,{style:{alignItems:"flex-start",gap:5}},
+                  h("button",{onClick:function(){togD(item.id);},style:{marginTop:1,width:17,height:17,minWidth:17,borderRadius:4,border:"2px solid "+(item.doneDate?C.success:weekColor),background:item.doneDate?C.success:"transparent",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}},item.doneDate&&h("span",{style:{color:"#fff",fontSize:10,fontWeight:900}},"✓")),
+                  h("div",{style:{flex:1,minWidth:0}},
+                    h("div",{style:{fontSize:12,color:C.text,lineHeight:1.4,wordBreak:"break-word"}},
+                      isAuto&&h("span",{style:{fontSize:9,color:weekColor,fontWeight:700,marginRight:4}},"auto"),
+                      item.text
+                    ),
+                    h("div",{style:{display:"flex",gap:5,marginTop:3,flexWrap:"wrap",alignItems:"center"}},
+                      item.planDate&&h(Tag,{color:item.planDate<=today?C.stale:weekColor},(item.planDate<=today?"🔔 ":"📅 ")+fDate(item.planDate)),
+                      !item.doneDate&&!isAuto&&h("input",{type:"date",value:item.planDate||"",onChange:function(e){setPD(item.id,e.target.value);},style:{fontSize:10,border:"1px solid "+C.border,borderRadius:5,padding:"2px 4px",color:C.muted,background:"transparent"}})
+                    )
+                  ),
+                  h("div",{style:{display:"flex",flexDirection:"column",gap:2}},
+                    h("button",{onClick:function(){setEditId(item.id);setEditText(item.text);},style:{background:"none",border:"none",cursor:"pointer",fontSize:11,color:C.muted,padding:0}},"✏️"),
+                    h("button",{onClick:function(){setMM(item);},style:{background:"none",border:"none",cursor:"pointer",fontSize:11,color:C.muted,padding:0}},"↕"),
+                    h("button",{onClick:function(){rmI(item.id);},style:{background:"none",border:"none",cursor:"pointer",fontSize:13,color:C.muted,padding:0}},"×")
+                  )
+                )
+          );
+        }),
+        renderDoneSection("week",doneItems)
+      )
+    );
+  }
+
   function renderPlanWithDate(){
-    var dated=p.items.filter(function(x){return x.quadrant==="plan"&&x.planDate&&!x.doneDate;});
-    if(!sortLock){dated=dated.slice().sort(function(a,b){return a.planDate<b.planDate?-1:1;});}
+    var datedRaw=p.items.filter(function(x){return x.quadrant==="plan"&&x.planDate&&!x.doneDate;});
+    // Only re-sort when the debounce timer has fired (sortedDatedRef.current===null)
+    if(sortedDatedRef.current===null||sortedDatedRef.current.length!==datedRaw.length){
+      sortedDatedRef.current=datedRaw.slice().sort(function(a,b){return a.planDate<b.planDate?-1:1;});
+    }
+    // Apply the sorted order but use current data (so dates display correctly while editing)
+    var dated=sortedDatedRef.current.map(function(s){return datedRaw.find(function(x){return x.id===s.id;})||s;}).filter(Boolean);
     var doneItems=p.items.filter(function(x){return x.quadrant==="plan"&&x.doneDate&&x.doneDate>=weekStart;});
     var io=dO==="plan-dated";
     var q=QUADRANTS.find(function(q){return q.id==="plan";});
@@ -868,7 +949,10 @@ function Matrix(p){
   return h(Cl,{gap:12},
 
     dueToday.length>0&&h("div",{style:{background:C.oL,border:"2px solid "+C.orange,borderRadius:12,padding:12}},
-      h("div",{style:{fontSize:13,fontWeight:700,color:C.orange,marginBottom:8}},"📅 "+dueToday.length+" tâche(s) planifiée(s) pour aujourd'hui ou en retard"),
+      h(R,{style:{justifyContent:"space-between",alignItems:"center",marginBottom:8}},
+        h("div",{style:{fontSize:13,fontWeight:700,color:C.orange}},"📅 "+dueToday.length+" tâche(s) à traiter — échues ou prévues aujourd'hui"),
+        h("div",{style:{fontSize:11,color:C.muted}},"→ Urgent · ↕ Déplacer · ✓ Fait")
+      ),
       dueToday.map(function(item){
         return h(R,{key:item.id,style:{marginBottom:6,gap:8,flexWrap:"wrap"}},
           h("span",{style:{fontSize:13,flex:1,color:C.text,minWidth:120}},item.text),
@@ -879,6 +963,7 @@ function Matrix(p){
         );
       })
     ),
+
     h("div",{style:{background:C.surface,border:"1px solid "+C.border,borderRadius:14,padding:12}},
       h("div",{style:{fontSize:11,fontWeight:700,color:C.muted,marginBottom:8,letterSpacing:"0.06em"}},"AJOUTER UNE TÂCHE"),
       h(R,{style:{flexWrap:"wrap",gap:8}},
@@ -900,8 +985,9 @@ function Matrix(p){
     ),
     bee&&h(R,{style:{background:"linear-gradient(135deg,#FBF5E0,#FFF9F0)",border:"2px solid "+C.gold,borderRadius:14,padding:"12px 16px",gap:14}},h("span",{style:{fontSize:32}},"🐝"),h("div",null,h("div",{style:{fontWeight:700,color:C.gold,fontSize:14}},"Mode Abeille active !"),h("div",{style:{color:C.muted,fontSize:12,marginTop:2}},"Les essentiels sont faits. Philippe vole librement."))),
     h("div",{style:{fontSize:11,color:C.muted,textAlign:"center"}},"💡 Glisse les cartes · ✏️ pour éditer"),
-    h("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:8}},
+    h("div",{style:{display:"grid",gridTemplateColumns:"repeat(5,minmax(0,1fr))",gap:8}},
       renderQuadrant(QUADRANTS.find(function(q){return q.id==="do";})),
+      renderWeekSection(),
       renderPlanWithDate(),
       renderPlanNoDate(),
       renderQuadrant(QUADRANTS.find(function(q){return q.id==="deleg";}))
@@ -1328,10 +1414,10 @@ function MigrationBanner(p){
 }
 
 // ── APP ───────────────────────────────────────────────────────────
-var TABS=[{id:"focus",label:"🎯 Focus"},{id:"braindump",label:"🧠 Vider la tête"},{id:"matrix",label:"📊 Matrice"},{id:"process",label:"📋 Process"},{id:"handover",label:"🔄 Passation"},{id:"week",label:"📅 Bilan"}];
+var TABS=[{id:"braindump",label:"🧠 Vider la tête"},{id:"matrix",label:"📊 Matrice"},{id:"process",label:"📋 Process"},{id:"handover",label:"🔄 Passation"},{id:"week",label:"📅 Bilan"}];
 
 function App(){
-  var s0=useState("focus"),tab=s0[0],setTab=s0[1];
+  var s0=useState("matrix"),tab=s0[0],setTab=s0[1];
   var sReady=useState(false),cloudReady=sReady[0],setCloudReady=sReady[1];
   var sErr=useState(false),cloudErr=sErr[0],setCloudErr=sErr[1];
 
@@ -1413,7 +1499,6 @@ function App(){
     h("div",{style:{maxWidth:tab==="matrix"?"75%":760,margin:"0 auto",padding:tab==="matrix"?"12px 12px":"18px 14px"}},
       showMig&&h(MigrationBanner,{onDone:function(){setShowMig(false);}}),
       showRecovery&&h(RecoveryPanel,{onDone:function(){setShowRecovery(false);}}),
-      tab==="focus"    &&h(Focus,{intention:intention,setIntention:setIntention}),
       tab==="braindump"&&h(BrainDump,{items:items,setItems:setItems}),
       tab==="matrix"   &&h(Matrix,{items:items,setItems:setItems,setHandover:setHandover,setTab:setTab}),
       tab==="process"  &&h(ProcessLib,{handover:handover,setHandover:setHandover}),
